@@ -49,6 +49,9 @@ export default {
     strategies: {
       customStrategy: {
         scheme: '~/schemes/customScheme',
+        token: {
+          global: false
+        }
         /* ... */
       }
     }
