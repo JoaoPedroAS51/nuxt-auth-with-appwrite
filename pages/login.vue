@@ -24,6 +24,7 @@
 
 <script>
 export default {
+  middleware: ['auth'],
   data: () => ({
     email: 'aus@gmail.com',
     password: 'sonic123',
@@ -45,9 +46,6 @@ export default {
     async logout() {
       await this.$auth
         .logout()
-        .then((res) => {
-          console.log(res)
-        })
         .catch((err) => console.error(err))
     },
   },
