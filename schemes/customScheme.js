@@ -1,76 +1,100 @@
-import { LocalScheme } from '~auth/runtime'
-import appwrite from '~/config/appwrite'
+import { LocalScheme, Token as BaseToken,  } from '~auth/runtime'
+
+function removeTokenPrefix(
+  token,
+  tokenType
+) {
+  if (!token || !tokenType || typeof token !== 'string') {
+    return token
+  }
+
+  return token.replace(tokenType + ' ', '')
+}
+
+class Token extends BaseToken {
+  _setAppwriteToken(tokenValue) {
+    const token = removeTokenPrefix(tokenValue, this.scheme.options.token.type)
+    this.scheme.$auth.ctx.$appwrite.setJWT(token)
+  }
+
+  set (tokenValue) {
+    const token = super.set(tokenValue)
+
+    if (typeof token === 'string') {
+      this._setAppwriteToken(token)
+    }
+
+    return token
+  }
+
+  sync () {
+    const token =  super.sync()
+
+    if (typeof token === 'string') {
+      this._setAppwriteToken(token)
+    }
+
+    return token
+  }
+
+  reset () {
+    super.reset()
+    this._setAppwriteToken('')
+  }
+}
 
 export default class SupabaseScheme extends LocalScheme {
-    async fetchUser() {
-        console.log("fetching user")
-
-        if (appwrite.account.get() == undefined) {
-            this.$auth.setUser(false)
-            return
-        }
-
-        await appwrite.account.get()
-            .then((response) => {
-                console.log("USER", response) // Success
-                this.$auth.setUser(response)
-            })
-            .catch(err => {
-                console.log(err)
-                return
-            })
-    }
-
-    async logout() {
-        // const supabase = this.$auth.ctx.$supabase.auth
-        // await supabase.signOut()
-        // return this.$auth.reset()
-        console.log('session id', this.$auth.user.$id)
-        await appwrite.account.deleteSession('current')
-            .then(res => {
-                console.log("Logged out")
-                this.$auth.setUser({})
-            }).catch(err => {
-                console.log('Error deleting session', err)
-            })
-    }
-
-    reset() {
-        console.log('RESET() called')
-        this.$auth.setUser(false)
+    constructor($auth, options, ...defaults) {
+      super($auth, options, ...defaults);
+      this.token = new Token(this, this.$auth.$storage);
     }
 
     async login(options) {
         const { email, password } = options
 
-        await appwrite.account.createSession(email, password)
-            .then((session) => {
-                console.log('REGISTERED IN!!')
-                this.$auth.setUser(session)
-            })
+        await this.$auth.ctx.$appwrite.account.createSession(email, password)
             .catch((err) => {
-                console.log(err)
-                this.$auth.callOnError(error)
-                return Promise.reject(error)
+                this.$auth.callOnError(err)
+                return Promise.reject(err, { method: 'login' })
             })
 
-        appwrite.account.createJWT()
+        await this.$auth.ctx.$appwrite.account.createJWT()
             .then((res) => {
-                console.log("JWT created", this.$auth.user)
-                this.$auth.setUser(res)
+                this.updateTokens(res)
             })
             .catch((err) => {
-                console.log("error creating JWT", err)
+                this.$auth.callOnError(err)
+                return Promise.reject(err, { method: 'login' })
             })
+
+        await this.fetchUser()
     }
 
-    check() {
-        console.log("checking user")
-        const response = {
-            valid: appwrite.account.get() !== undefined,
-            tokenExpired: false
+    fetchUser() {
+        if (!this.check().valid) {
+            return Promise.resolve()
         }
 
-        return response
+        return this.$auth.ctx.$appwrite.account.get()
+            .then((user) => {
+                this.$auth.setUser(user)
+            }).catch((err) => {
+                this.$auth.callOnError(err, { method: 'fetchUser' });
+                return Promise.reject(err);
+            });
+    }
+
+    logout() {
+        return this.$auth.ctx.$appwrite.account.deleteSession('current')
+            .then(() => {
+                this.$auth.reset()
+            }).catch((err) => {
+                this.$auth.callOnError(err, { method: 'logout' });
+                return Promise.reject(err);
+          });
+    }
+
+    updateTokens(response) {
+        this.token.set(response.jwt);
     }
 }
